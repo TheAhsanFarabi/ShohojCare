@@ -1,13 +1,13 @@
 // app/chat/[id]/page.tsx
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { Send, ArrowLeft, MessageCircle, Loader2, AlertCircle, Info } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Send, ArrowLeft, MessageCircle, Loader2, AlertCircle } from 'lucide-react';
+import { motion } from 'framer-motion';
 
-// --- TYPES & HELPER ---
+// --- TYPES & HELPER (Reused) ---
 interface Doctor {
   id: string;
   name: string;
@@ -40,8 +40,6 @@ export default function ChatPage() {
   const router = useRouter();
   const [doctor, setDoctor] = useState<Doctor | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showInfo, setShowInfo] = useState(false); // Mobile info toggle
-  const chatEndRef = useRef<HTMLDivElement>(null);
 
   // --- FETCH DOCTOR DATA ---
   useEffect(() => {
@@ -56,7 +54,10 @@ export default function ChatPage() {
 
         if (error) throw error;
         if (data) {
-          setDoctor({ ...data, ...getThemeStyles(data.theme) });
+          setDoctor({
+            ...data,
+            ...getThemeStyles(data.theme)
+          });
         }
       } catch (err) {
         console.error("Error fetching doctor:", err);
@@ -92,18 +93,20 @@ export default function ChatPage() {
         })
       });
 
-      if (!response.ok) throw new Error('Failed to connect to doctor.');
+      if (!response.ok) throw new Error('API request failed');
       
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      let assistantMessage = '';
+      if (response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let assistantMessage = '';
 
-      if (reader) {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          assistantMessage += decoder.decode(value);
+          const chunk = decoder.decode(value);
+          assistantMessage += chunk;
         }
+
         setMessages([...newMessages, { role: 'assistant', content: assistantMessage }]);
       }
     } catch (err) {
@@ -113,29 +116,35 @@ export default function ChatPage() {
     }
   };
 
-  // Auto-scroll to bottom
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    handleSendMessage(input);
+  };
+
+  // Auto-scroll
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isSending]);
+    const chatContainer = document.getElementById('chat-container');
+    if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;
+  }, [messages, isSending, error]);
 
   if (loading) {
     return (
-      <div className="h-[100dvh] flex items-center justify-center bg-slate-50">
+      <div className="h-screen flex items-center justify-center bg-slate-50">
         <Loader2 className="w-10 h-10 text-teal-500 animate-spin" />
       </div>
     );
   }
 
-  if (!doctor) return <div className="p-10 text-center font-bold">Doctor not found.</div>;
+  if (!doctor) return <div>Doctor not found.</div>;
 
   return (
-    <div className="flex h-[100dvh] overflow-hidden bg-white font-sans text-slate-900">
+    <div className="flex h-screen overflow-hidden bg-slate-50 font-sans">
       
       {/* SIDEBAR (Desktop) */}
-      <aside className={`hidden md:flex flex-col w-80 p-6 border-r-2 border-slate-200 ${doctor.bg}`}>
+      <div className={`hidden md:flex flex-col w-80 p-6 border-r-2 border-slate-200 ${doctor.bg}`}>
         <button 
           onClick={() => router.push('/')}
-          className="self-start mb-8 p-3 rounded-xl bg-white border-2 border-slate-200 border-b-4 hover:bg-slate-50 active:translate-y-0.5 transition-all"
+          className="self-start mb-8 p-3 rounded-xl bg-white border-2 border-slate-200 border-b-4 hover:bg-slate-50 active:border-b-2 active:translate-y-0.5 transition-all"
         >
           <ArrowLeft className="text-slate-400" size={24} />
         </button>
@@ -145,63 +154,36 @@ export default function ChatPage() {
              <img src={doctor.image_url} alt={doctor.name} className="w-full h-full object-cover" />
           </div>
           <h2 className="text-2xl font-extrabold text-slate-700">{doctor.name}</h2>
-          <span className="px-3 py-1 rounded-full bg-white/50 text-slate-600 text-xs font-bold mt-2 border-2 border-slate-200/50 uppercase tracking-tighter">
+          <span className="px-3 py-1 rounded-full bg-white/50 text-slate-600 text-xs font-bold mt-2 border-2 border-slate-200/50">
             {doctor.specialty}
           </span>
-          <div className="mt-8 w-full bg-white/60 p-4 rounded-2xl border-2 border-slate-100 text-left">
-            <h4 className="text-[10px] font-black text-slate-400 uppercase mb-2 tracking-widest">About</h4>
+          <div className="mt-8 w-full bg-white/60 p-4 rounded-2xl border-2 border-slate-100">
+            <h4 className="text-xs font-black text-slate-400 uppercase mb-2 tracking-wider">About</h4>
             <p className="text-sm text-slate-600 leading-relaxed font-medium">
               {doctor.notes}
             </p>
           </div>
         </div>
-      </aside>
+      </div>
 
       {/* MAIN CHAT AREA */}
-      <main className="flex-1 flex flex-col relative bg-white">
+      <div className="flex-1 flex flex-col relative bg-white">
         
-        {/* Mobile Header - Optimized for Android */}
-        <header className="md:hidden flex items-center justify-between p-3 border-b-2 border-slate-100 bg-white sticky top-0 z-10">
-          <div className="flex items-center">
-            <button onClick={() => router.push('/')} className="p-2 mr-1 text-slate-400 active:bg-slate-100 rounded-full transition-colors">
-              <ArrowLeft size={24} />
-            </button>
-            <div className={`w-10 h-10 rounded-xl ${doctor.color} mr-3 overflow-hidden shadow-sm`}>
-               <img src={doctor.image_url} alt={doctor.name} className="w-full h-full object-cover" />
-            </div>
-            <div>
-              <h3 className="font-bold text-slate-800 text-sm leading-none">{doctor.name}</h3>
-              <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">{doctor.specialty}</p>
-            </div>
+        {/* Mobile Header */}
+        <div className="md:hidden flex items-center p-3 border-b-2 border-slate-100 bg-white">
+          <button onClick={() => router.push('/')} className="mr-3 text-slate-400"><ArrowLeft size={20} /></button>
+          <div className={`w-8 h-8 rounded-lg ${doctor.color} mr-2 overflow-hidden`}>
+             <img src={doctor.image_url} alt={doctor.name} className="w-full h-full object-cover" />
           </div>
-          <button 
-            onClick={() => setShowInfo(!showInfo)}
-            className="p-2 text-slate-400 active:bg-slate-100 rounded-full"
-          >
-            <Info size={20} />
-          </button>
-        </header>
+          <h3 className="font-bold text-slate-700 text-sm">{doctor.name}</h3>
+        </div>
 
-        {/* Mobile Info Dropdown */}
-        <AnimatePresence>
-          {showInfo && (
-            <motion.div 
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              className="md:hidden bg-slate-50 border-b-2 border-slate-200 overflow-hidden px-5 py-4"
-            >
-              <p className="text-xs text-slate-600 leading-snug">{doctor.notes}</p>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* MESSAGES - Improved Padding for Mobile */}
-        <div className="flex-1 overflow-y-auto px-4 py-6 md:p-8 space-y-6">
+        {/* MESSAGES */}
+        <div id="chat-container" className="flex-1 overflow-y-auto p-3 md:p-8 space-y-4 md:space-y-6">
           {messages.length === 0 && !error && (
             <div className="flex flex-col items-center justify-center h-full text-slate-300">
-              <MessageCircle size={48} className="mb-4 opacity-20" />
-              <p className="font-bold text-center">Start speaking in Bangla...</p>
+              <MessageCircle size={48} className="mb-4 opacity-20 md:w-16 md:h-16" />
+              <p className="font-bold text-base md:text-lg">Start speaking in Bangla...</p>
             </div>
           )}
 
@@ -210,18 +192,21 @@ export default function ChatPage() {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               key={i}
-              className={`flex gap-2.5 max-w-[90%] md:max-w-2xl ${m.role === 'user' ? 'ml-auto flex-row-reverse' : ''}`}
+              className={`flex gap-2 md:gap-3 max-w-2xl ${m.role === 'user' ? 'ml-auto flex-row-reverse' : ''}`}
             >
-               <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg md:rounded-xl shrink-0 flex items-center justify-center border-b-2 md:border-b-4 overflow-hidden ${
+               {/* Avatar: Smaller on mobile (w-8 h-8) vs desktop (w-10 h-10) */}
+               <div className={`w-8 h-8 md:w-10 md:h-10 rounded-xl shrink-0 flex items-center justify-center border-b-4 overflow-hidden ${
                 m.role === 'user' ? 'bg-slate-200 border-slate-300' : `${doctor.color} border-black/10`
               }`}>
                 {m.role === 'user' ? (
-                  <span className="font-black text-slate-500 text-[10px]">ME</span> 
+                  <span className="font-bold text-slate-500 text-[10px] md:text-xs">ME</span> 
                 ) : (
                   <img src={doctor.image_url} alt="doc" className="w-full h-full object-cover" />
                 )}
               </div>
-              <div className={`px-4 py-2.5 rounded-2xl border-2 border-b-4 text-[15px] md:text-base font-medium leading-relaxed ${
+              
+              {/* Message Bubble: Reduced padding on mobile (px-4 py-2) */}
+              <div className={`px-4 py-2 md:px-5 md:py-3 rounded-2xl border-2 border-b-4 text-sm md:text-base font-medium leading-relaxed ${
                 m.role === 'user'
                   ? 'bg-white border-slate-200 text-slate-700 rounded-tr-none'
                   : `${doctor.bg} border-${doctor.color?.replace('bg-', '') || 'teal'}-200 text-slate-800 rounded-tl-none`
@@ -231,59 +216,64 @@ export default function ChatPage() {
             </motion.div>
           ))}
 
+          {/* Thinking Indicator */}
           {isSending && (
-            <div className="flex gap-2.5 max-w-2xl">
-              <div className={`w-8 h-8 rounded-lg shrink-0 border-b-2 ${doctor.color} border-black/10 overflow-hidden`}>
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex gap-2 md:gap-3 max-w-2xl">
+              <div className={`w-8 h-8 md:w-10 md:h-10 rounded-xl shrink-0 border-b-4 ${doctor.color} border-black/10 overflow-hidden`}>
                 <img src={doctor.image_url} alt="doc" className="w-full h-full object-cover" />
               </div>
-              <div className={`px-4 py-3 rounded-2xl border-2 border-b-4 ${doctor.bg} border-${doctor.color?.replace('bg-', '') || 'teal'}-200 rounded-tl-none flex items-center gap-1`}>
-                 <motion.div animate={{ scale: [1, 1.2, 1] }} transition={{ repeat: Infinity, duration: 0.8 }} className="w-1.5 h-1.5 bg-slate-400 rounded-full" />
-                 <motion.div animate={{ scale: [1, 1.2, 1] }} transition={{ repeat: Infinity, duration: 0.8, delay: 0.2 }} className="w-1.5 h-1.5 bg-slate-400 rounded-full" />
-                 <motion.div animate={{ scale: [1, 1.2, 1] }} transition={{ repeat: Infinity, duration: 0.8, delay: 0.4 }} className="w-1.5 h-1.5 bg-slate-400 rounded-full" />
+              <div className={`px-4 py-3 md:px-5 md:py-4 rounded-2xl border-2 border-b-4 ${doctor.bg} border-${doctor.color?.replace('bg-', '') || 'teal'}-200 rounded-tl-none flex items-center gap-1`}>
+                  <span className="text-[10px] md:text-xs font-bold text-slate-400 mr-2">Thinking</span>
+                  <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6 }} className="w-1.5 h-1.5 md:w-2 md:h-2 bg-slate-400 rounded-full" />
+                  <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.1 }} className="w-1.5 h-1.5 md:w-2 md:h-2 bg-slate-400 rounded-full" />
+                  <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.2 }} className="w-1.5 h-1.5 md:w-2 md:h-2 bg-slate-400 rounded-full" />
               </div>
-            </div>
+            </motion.div>
           )}
 
-          <div ref={chatEndRef} />
+          {error && (
+            <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="mx-auto max-w-md bg-red-50 border-2 border-red-200 rounded-xl p-3 md:p-4 flex flex-col items-center text-center space-y-2">
+              <AlertCircle className="text-red-500 w-6 h-6 md:w-8 md:h-8" />
+              <div className="text-red-500 font-bold text-sm">⚠️ Error</div>
+              <p className="text-xs md:text-sm text-red-600">{error}</p>
+              <button onClick={() => setMessages([])} className="mt-2 px-3 py-1.5 bg-white border-2 border-red-200 rounded-lg text-red-500 text-xs font-bold hover:bg-red-50">Retry</button>
+            </motion.div>
+          )}
         </div>
 
-        {/* INPUT AREA - Sticky Bottom & Safe Area aware */}
-        <div className="p-3 md:p-6 border-t-2 border-slate-100 bg-white pb-[env(safe-area-inset-bottom,1rem)]">
-          {/* Quick Questions - Better Mobile Scroll */}
-          <div className="flex gap-2 mb-3 overflow-x-auto no-scrollbar -mx-1 px-1">
+        {/* INPUT */}
+        <div className="p-3 md:p-6 border-t-2 border-slate-100 bg-white">
+          <div className="flex gap-2 mb-3 overflow-x-auto pb-2 scrollbar-hide">
             {doctor.quick_questions?.map((q, i) => (
               <button
                 key={i}
-                onClick={() => handleSendMessage(q)}
+                onClick={() => setInput(q)}
                 disabled={isSending}
-                className="whitespace-nowrap px-4 py-2 rounded-full bg-slate-50 border-2 border-slate-200 border-b-4 text-slate-500 text-[13px] font-bold active:translate-y-0.5 transition-all disabled:opacity-50"
+                className="whitespace-nowrap px-3 py-1.5 md:px-4 md:py-2 rounded-xl bg-slate-50 border-2 border-slate-200 border-b-4 text-slate-500 text-[10px] md:text-xs font-bold hover:bg-slate-100 hover:border-slate-300 active:border-b-2 active:translate-y-0.5 transition-all disabled:opacity-50"
               >
                 {q}
               </button>
             ))}
           </div>
 
-          <form 
-            onSubmit={(e) => { e.preventDefault(); handleSendMessage(input); }} 
-            className="flex gap-2"
-          >
+          <form onSubmit={handleSubmit} className="flex gap-2 md:gap-3">
             <input
-              className="flex-1 bg-slate-100 border-2 border-slate-200 border-b-4 rounded-2xl px-4 py-3 focus:outline-none focus:border-teal-400 focus:bg-white text-slate-700 font-medium placeholder:text-slate-400 transition-all text-[16px]" // text-16px prevents iOS zoom, better for Android too
+              className="flex-1 bg-slate-100 border-2 border-slate-200 border-b-4 rounded-2xl px-4 py-2 md:px-5 md:py-3 text-sm md:text-base focus:outline-none focus:border-teal-400 focus:bg-white text-slate-700 font-medium placeholder:text-slate-400 transition-all disabled:opacity-70"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               disabled={isSending} 
-              placeholder={isSending ? "Processing..." : "Describe symptoms..."}
+              placeholder={isSending ? "Please wait..." : "Type your symptoms..."}
             />
             <button 
               type="submit"
               disabled={isSending || !input.trim()}
-              className="w-12 h-12 flex items-center justify-center shrink-0 rounded-2xl bg-teal-500 border-b-4 border-teal-700 text-white active:border-b-0 active:translate-y-1 disabled:opacity-50 transition-all"
+              className="px-4 md:px-6 rounded-2xl bg-teal-500 border-b-4 border-teal-700 text-white font-bold hover:bg-teal-400 active:border-b-0 active:translate-y-1 disabled:opacity-50 disabled:active:translate-y-0 transition-all flex items-center justify-center"
             >
-              <Send size={20} />
+              <Send size={18} className="md:w-5 md:h-5" />
             </button>
           </form>
         </div>
-      </main>
+      </div>
     </div>
   );
 }
